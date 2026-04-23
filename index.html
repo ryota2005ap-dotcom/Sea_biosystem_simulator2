@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Marine Ecosystem Simulation - Extended</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font-family: sans-serif; display: flex; overflow: hidden; height: 100vh; }
+  #ui { padding: 15px; width: 280px; background: #222; height: 100vh; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.5); z-index: 10; font-size: 13px; }
+  #main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #1a1a1a; position: relative; }
+  canvas { border: 1px solid #444; background: #fff; cursor: crosshair; }
+  #sim { width: 600px; height: 600px; image-rendering: pixelated; }
+  .charts-container { display: flex; flex-direction: column; gap: 10px; padding: 10px; background: #222; width: 320px; }
+  #pieChart { width: 320px; height: 160px; }
+  #lineChart { width: 320px; height: 420px; }
+  label { display: block; margin-top: 8px; color: #bbb; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row input[type="range"] { flex: 1; }
+  .row input[type="number"] { width: 55px; background: #333; color: #fff; border: 1px solid #555; }
+  
+  .tool-btn { margin-top: 5px; width: 100%; padding: 8px; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; transition: 0.2s; font-size: 11px; }
+  .reset-btn { margin-top: 15px; background: #600; color: white; height: 40px; }
+  .clear-btn { margin-top: 5px; background: #444; color: #faa; }
+  .reset-btn:hover { background: #900; }
+  .clear-btn:hover { background: #555; }
+  
+  /* Edit Modes */
+  .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; }
+  .land-btn { background: #543; color: white; }
+  .algae-btn { background: #f9c; color: #311; }
+  .src-btn { background: #000; color: white; }
+  .erase-btn { background: #ddd; color: #333; }
+  .tool-btn.active { outline: 3px solid #fc0; transform: scale(0.98); box-shadow: 0 0 10px #fc0; z-index: 1; }
+  
+  b { color: #0cf; font-size: 14px; display: block; margin-top: 12px; border-bottom: 1px solid #444; padding-bottom: 3px; }
+  .mode-indicator { position: absolute; top: 15px; left: 15px; padding: 8px 20px; background: rgba(0,0,0,0.8); border: 1px solid #fc0; border-radius: 20px; color: #fc0; font-weight: bold; pointer-events: none; opacity: 0; transition: 0.3s; z-index: 20; }
+  .mode-indicator.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <b>初期個数</b>
+  <label>Nutrient<input id="initN" type="number" value="300"></label>
+  <label>Plankton<input id="initP" type="number" value="500"></label>
+  <label>SmallFish<input id="initS" type="number" value="250"></label>
+  <label>BigFish<input id="initB" type="number" value="100"></label>
+
+  <b>繁殖確率 (0.0~1.0)</b>
+  <label>P (分列)<div class="row"><input id="splitP" type="range" min="0" max="1" step="0.01" value="0.80"><input id="splitP_num" type="number" value="0.80"></div></label>
+  <label>S (繁殖)<div class="row"><input id="splitS" type="range" min="0" max="1" step="0.01" value="0.45"><input id="splitS_num" type="number" value="0.45"></div></label>
+  <label>B (繁殖)<div class="row"><input id="splitB" type="range" min="0" max="1" step="0.01" value="0.25"><input id="splitB_num" type="number" value="0.25"></div></label>
+
+  <b>平均寿命 (1/自然消滅確率)</b>
+  <small style="color:#888;">値が大きいほど長生きします (Max:1000)</small>
+  <label>N 寿命<div class="row"><input id="deathN" type="range" min="1" max="1000" step="1" value="20"><input id="deathN_num" type="number" value="20"></div></label>
+  <label>P 寿命<div class="row"><input id="deathP" type="range" min="1" max="1000" step="1" value="50"><input id="deathP_num" type="number" value="50"></div></label>
+  <label>S 寿命<div class="row"><input id="deathS" type="range" min="1" max="1000" step="1" value="50"><input id="deathS_num" type="number" value="50"></div></label>
+  <label>B 寿命<div class="row"><input id="deathB" type="range" min="1" max="1000" step="1" value="50"><input id="deathB_num" type="number" value="50"></div></label>
+
+  <b>マップエディタ</b>
+  <div class="edit-grid">
+    <button id="btnLand" class="tool-btn land-btn" onclick="setMode('land')">LAND</button>
+    <button id="btnAlgae" class="tool-btn algae-btn" onclick="setMode('algae')">ALGAE</button>
+    <button id="btnSource" class="tool-btn src-btn" onclick="setMode('source')">SOURCE</button>
+    <button id="btnEraser" class="tool-btn erase-btn" onclick="setMode('eraser')">ERASER</button>
+  </div>
+  <button class="tool-btn" style="margin-top:10px; background:#444; color:white;" onclick="setMode(null)">STOP EDITING</button>
+  
+  <button class="tool-btn clear-btn" onclick="clearEverything()">CLEAR MAP & AGENTS</button>
+  <button class="tool-btn reset-btn" onclick="resetSim()">RESET AGENTS ONLY</button>
+</div>
+
+<div id="main">
+  <div id="modeIndicator" class="mode-indicator">MODE</div>
+  <canvas id="sim" width="600" height="600"></canvas>
+</div>
+
+<div class="charts-container">
+  <canvas id="pieChart" width="320" height="160"></canvas>
+  <canvas id="lineChart" width="320" height="420"></canvas>
+</div>
+
+<script>
+const GRID = 60;
+const canvas = document.getElementById('sim');
+const ctx = canvas.getContext('2d');
+const pctx = document.getElementById('pieChart').getContext('2d');
+const lctx = document.getElementById('lineChart').getContext('2d');
+
+const SIZE = canvas.width / GRID;
+let agents = [];
+let history = [];
+
+// 属性マップ (0:海, 1:陸, 2:藻場, 3:栄養源)
+let terrain = new Uint8Array(GRID * GRID);
+
+// 履歴を3倍（180 -> 540）に延長
+const MAX_HISTORY = 540; 
+let frame = 0;
+let editMode = null; 
+let isMouseDown = false;
+
+const COLORS = {
+  bigFish: '#ff4d4d',
+  smallFish: '#ffae42',
+  plankton: '#2ecc71',
+  nutrient: '#3498db',
+  land: '#543',
+  algae: 'rgba(255, 180, 220, 0.5)',
+  source: '#000',
+  water: '#fff'
+};
+
+const KEYS_STACK = ['bigFish', 'smallFish', 'plankton', 'nutrient'];
+
+function resetSim() {
+  agents = [];
+  history = [];
+  const spawn = (count, type) => {
+    let i = 0;
+    while(i < count) {
+      let x = randPos(), y = randPos();
+      if (terrain[y * GRID + x] !== 1) {
+        agents.push({x, y, type});
+        i++;
+      }
+    }
+  };
+  spawn(+initN.value, 'nutrient');
+  spawn(+initP.value, 'plankton');
+  spawn(+initS.value, 'smallFish');
+  spawn(+initB.value, 'bigFish');
+}
+
+function clearEverything() {
+  terrain.fill(0);
+  agents = [];
+  history = [];
+}
+
+function randPos() { return Math.floor(Math.random() * GRID); }
+
+function bindPair(r, n, isReciprocal) {
+  r.oninput = () => n.value = r.value;
+  n.oninput = () => {
+    let minV = isReciprocal ? 1 : 0;
+    let maxV = isReciprocal ? 1000 : 1;
+    let v = Math.max(minV, Math.min(maxV, n.value));
+    n.value = v; r.value = v;
+  };
+}
+
+// 繁殖確率は従来通り
+bindPair(splitP, splitP_num, false); bindPair(splitS, splitS_num, false); bindPair(splitB, splitB_num, false);
+// 寿命（逆数）としてバインド
+bindPair(deathN, deathN_num, true); bindPair(deathP, deathP_num, true); bindPair(deathS, deathS_num, true); bindPair(deathB, deathB_num, true);
+
+function setMode(mode) {
+  editMode = mode;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const indicator = document.getElementById('modeIndicator');
+  if (mode) {
+    const btnId = 'btn' + mode.charAt(0).toUpperCase() + mode.slice(1);
+    document.getElementById(btnId)?.classList.add('active');
+    indicator.textContent = mode.toUpperCase() + " MODE";
+    indicator.classList.add('visible');
+  } else {
+    indicator.classList.remove('visible');
+  }
+}
+
+function handleInput(e) {
+  if (!editMode || !isMouseDown) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) / (rect.width / GRID));
+  const y = Math.floor((e.clientY - rect.top) / (rect.height / GRID));
+  const applyBrush = (cx, cy, type, isCross) => {
+    const coords = isCross ? [[0,0], [1,0], [-1,0], [0,1], [0,-1]] : [[0,0]];
+    coords.forEach(d => {
+      let nx = cx + d[0], ny = cy + d[1];
+      if (nx >= 0 && nx < GRID && ny >= 0 && ny < GRID) {
+        terrain[ny * GRID + nx] = type;
+        if (type === 1) agents = agents.filter(a => !(a.x === nx && a.y === ny));
+      }
+    });
+  };
+  if (editMode === 'land') applyBrush(x, y, 1, true);
+  if (editMode === 'algae') applyBrush(x, y, 2, true);
+  if (editMode === 'source') applyBrush(x, y, 3, false);
+  if (editMode === 'eraser') applyBrush(x, y, 0, true);
+}
+
+canvas.addEventListener('mousedown', (e) => { isMouseDown = true; handleInput(e); });
+window.addEventListener('mouseup', () => { isMouseDown = false; });
+canvas.addEventListener('mousemove', handleInput);
+
+function tryMove(a, map) {
+  const r = Math.random();
+  if (r < 0.5) return; 
+  const dirs = [[1,0], [-1,0], [0,1], [0,-1]].sort(() => Math.random() - 0.5);
+  let targetType = a.type === 'plankton' ? 'nutrient' : 
+                   a.type === 'smallFish' ? 'plankton' : 
+                   a.type === 'bigFish' ? 'smallFish' : null;
+  for (let d of dirs) {
+    let nx = (a.x + d[0] + GRID) % GRID;
+    let ny = (a.y + d[1] + GRID) % GRID;
+    if (terrain[ny * GRID + nx] === 1) continue;
+    let cell = map[nx + ',' + ny];
+    if (cell && cell.some(o => o.type === a.type)) continue;
+    if (!targetType || (cell && cell.some(o => o.type === targetType)) || !cell) {
+      a.x = nx; a.y = ny;
+      return;
+    }
+  }
+}
+
+function update() {
+  if (editMode) return;
+  for (let i = 0; i < terrain.length; i++) {
+    if (terrain[i] === 3 && Math.random() < 0.3) {
+      agents.push({x: i % GRID, y: Math.floor(i / GRID), type: 'nutrient'});
+    }
+  }
+  let map = {};
+  agents.forEach(a => {
+    let k = a.x + ',' + a.y;
+    if (!map[k]) map[k] = [];
+    map[k].push(a);
+  });
+  agents.forEach(a => tryMove(a, map));
+  let nextMap = {};
+  agents.forEach(a => {
+    let k = a.x + ',' + a.y;
+    if (!nextMap[k]) nextMap[k] = [];
+    nextMap[k].push(a);
+  });
+  let nextAgents = [];
+  for (let k in nextMap) {
+    let cell = nextMap[k];
+    let groups = { nutrient:[], plankton:[], smallFish:[], bigFish:[] };
+    cell.forEach(a => groups[a.type].push(a));
+    const interact = (predators, prey, splitProb, type) => {
+      if (predators.length && prey.length) {
+        prey.pop(); 
+        if (Math.random() < splitProb) nextAgents.push({x: predators[0].x, y: predators[0].y, type});
+      }
+    };
+    interact(groups.plankton, groups.nutrient, +splitP.value, 'plankton');
+    interact(groups.smallFish, groups.plankton, +splitS.value, 'smallFish');
+    interact(groups.bigFish, groups.smallFish, +splitB.value, 'bigFish');
+    Object.values(groups).forEach(g => nextAgents.push(...g));
+  }
+
+  // 死亡判定（寿命の逆数を確率として使用）
+  agents = nextAgents.filter(a => {
+    if (terrain[a.y * GRID + a.x] === 2) return true;
+    let lifespan = a.type === 'nutrient' ? +deathN.value : a.type === 'plankton' ? +deathP.value : a.type === 'smallFish' ? +deathS.value : +deathB.value;
+    let deathProb = 1.0 / lifespan;
+    return Math.random() > deathProb;
+  });
+
+  const counts = { nutrient:0, plankton:0, smallFish:0, bigFish:0 };
+  agents.forEach(a => counts[a.type]++);
+  history.push(counts);
+  if (history.length > MAX_HISTORY) history.shift();
+}
+
+function draw() {
+  ctx.fillStyle = COLORS.water;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      let type = terrain[y * GRID + x];
+      if (type === 1) { ctx.fillStyle = COLORS.land; ctx.fillRect(x * SIZE, y * SIZE, SIZE, SIZE); }
+      else if (type === 2) { ctx.fillStyle = COLORS.algae; ctx.fillRect(x * SIZE, y * SIZE, SIZE, SIZE); }
+      else if (type === 3) { ctx.fillStyle = COLORS.source; ctx.fillRect(x * SIZE, y * SIZE, SIZE, SIZE); }
+    }
+  }
+  agents.forEach(a => {
+    ctx.fillStyle = COLORS[a.type];
+    ctx.fillRect(a.x * SIZE, a.y * SIZE, SIZE-0.5, SIZE-0.5);
+  });
+  drawCharts();
+}
+
+function drawCharts() {
+  const latest = history[history.length-1] || { nutrient:0, plankton:0, smallFish:0, bigFish:0 };
+  const total = (latest.nutrient + latest.plankton + latest.smallFish + latest.bigFish) || 1;
+  pctx.clearRect(0, 0, 320, 160);
+  let start = 0;
+  KEYS_STACK.forEach(k => {
+    let ratio = latest[k] / total;
+    pctx.beginPath(); pctx.moveTo(160, 80);
+    pctx.arc(160, 80, 55, start, start + ratio * Math.PI * 2);
+    pctx.fillStyle = COLORS[k]; pctx.fill();
+    start += ratio * Math.PI * 2;
+  });
+
+  lctx.clearRect(0, 0, 320, 420);
+  const padL = 45, padR = 20, padT = 30, padB = 40;
+  const gw = 320 - padL - padR, gh = 420 - padT - padB;
+  let maxTotal = 100;
+  history.forEach(h => {
+    let sum = h.nutrient + h.plankton + h.smallFish + h.bigFish;
+    if(sum > maxTotal) maxTotal = sum;
+  });
+  maxTotal = Math.ceil(maxTotal / 100) * 100;
+  lctx.font = "10px sans-serif";
+  lctx.fillStyle = "#888";
+  lctx.textAlign = "right";
+  lctx.strokeStyle = "#333";
+  for(let i=0; i <= maxTotal; i += 100) {
+    let y = padT + gh - (i / maxTotal) * gh;
+    lctx.fillText(i, padL - 10, y + 4);
+    lctx.beginPath(); lctx.moveTo(padL, y); lctx.lineTo(padL + gw, y); lctx.stroke();
+  }
+
+  let bottoms = new Array(history.length).fill(0);
+  KEYS_STACK.forEach(k => {
+    lctx.beginPath();
+    lctx.fillStyle = COLORS[k];
+    lctx.moveTo(padL, padT + gh);
+    history.forEach((h, i) => {
+      // 横軸のスケールを MAX_HISTORY に合わせることで、データが増えても全体が表示されるように
+      let x = padL + (i / (MAX_HISTORY - 1)) * gw;
+      let y = padT + gh - ((bottoms[i] + h[k]) / maxTotal) * gh;
+      lctx.lineTo(x, y);
+    });
+    for (let i = history.length - 1; i >= 0; i--) {
+      let x = padL + (i / (MAX_HISTORY - 1)) * gw;
+      let y = padT + gh - (bottoms[i] / maxTotal) * gh;
+      lctx.lineTo(x, y);
+      bottoms[i] += history[i][k];
+    }
+    lctx.closePath(); lctx.fill();
+  });
+}
+
+function loop() {
+  frame++;
+  if (frame % 2 === 0) update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resetSim();
+loop();
+</script>
+</body>
+</html>
